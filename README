@@ -1,0 +1,305 @@
+# Project Documentation: Game Aggregator Platform (Platform A)
+
+This document serves as the single source of truth for the development, setup, and deployment of Platform A. It is designed to be consumed by an AI development environment or a human developer. Adherence to the standards defined herein is mandatory.
+
+## Technology Stack 🛠️
+
+- **Frontend**: Next.js (React) with App Router
+- **UI Library**: MUI (Material-UI)
+- **Backend**: Node.js with Express.js
+- **Database ORM**: Prisma
+- **Database**: PostgreSQL (hosted on Neon)
+- **Deployment**: Render (for Frontend and Backend services)
+- **Package Manager**: pnpm (in a monorepo workspace)
+
+## Project Structure
+
+The project is organized as a monorepo with distinct packages for the frontend and backend.
+
+```plaintext
+/
+├── backend/
+│   ├── prisma/
+│   │   └── schema.prisma         # Database models (Source of Truth)
+│   ├── src/
+│   │   ├── api/                  # Express routes and controllers
+│   │   └── services/             # Business logic
+│   └── package.json
+│
+├── frontend/
+│   ├── src/
+│   │   ├── app/                  # Next.js App Router
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   └── interfaces/
+│   └── package.json
+│
+├── .gitignore
+├── package.json                  # Root package.json for monorepo scripts
+└── pnpm-workspace.yaml
+```
+
+## Local Development Setup
+
+Follow these steps to get the project running on a local machine.
+
+### 1. Prerequisites
+
+- Node.js (v18 or later)
+- pnpm
+- Git
+- A PostgreSQL database instance on a free Neon project.
+
+### 2. Installation
+
+1.  Clone the repository.
+2.  Install all dependencies from the root directory:
+    ```bash
+    pnpm install
+    ```
+
+### 3. Environment Variables
+
+You need to create `.env` files for both the backend and frontend.
+
+#### Backend (`/backend/.env`)
+
+```
+# Get this from your local Postgres or Neon project. Use the pooled connection string from Neon.
+DATABASE_URL="postgresql://user:password@host:port/dbname?sslmode=require"
+
+# Generate a strong, random string for JWT signing
+JWT_SECRET="YOUR_SUPER_STRONG_JWT_SECRET"
+```
+
+#### Frontend (`/frontend/.env.local`)
+
+```
+# This points to your local backend server during development
+NEXT_PUBLIC_API_URL="http://localhost:3001"
+```
+
+### 4. Database Migration
+
+From the root directory, run the Prisma migration command to set up your database schema:
+
+```bash
+pnpm --filter backend exec prisma migrate dev
+```
+
+### 5. Run the Application
+
+Start both the backend and frontend development servers concurrently. From the root directory:
+
+```bash
+# To run the backend (usually on port 3001)
+pnpm dev:backend
+
+# In a separate terminal, run the frontend (usually on port 3000)
+pnpm dev:frontend
+```
+
+## Database Schema (Source of Truth)
+
+The entire application's data structure is defined in the Prisma schema below. All API responses and frontend interfaces must align with these models.
+
+```prisma
+// /backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- USER & AUTH MODELS ---
+model User {
+  id           String    @id @default(cuid())
+  firstName    String?   @map("first_name")
+  lastName     String?   @map("last_name")
+  username     String    @unique
+  password     String
+  phone        String    @unique
+  nationality  String?
+  icPassport   String?   @unique @map("ic_passport")
+  dateOfBirth  DateTime? @map("date_of_birth") @db.Date
+  gender       Gender?
+  status       UserStatus
+  isVerified   Boolean   @default(false) @map("is_verified")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  roles        UserRole[]
+  wallet       Wallet?
+  bankAccounts BankAccount[]
+  cryptoAccounts CryptoAccount[]
+  transactions Transaction[]
+  gameBets     GameBet[]
+  addresses    Address[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Role {
+  id    String @id @default(cuid())
+  name  RoleName @unique
+  users UserRole[]
+  @@map("roles")
+}
+
+model UserRole {
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @map("user_id")
+  role      Role     @relation(fields: [roleId], references: [id])
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+
+// --- WALLET & TRANSACTION MODELS ---
+model Wallet {
+  id        String      @id @default(cuid())
+  balance   Decimal     @db.Decimal(12, 2)
+  status    WalletStatus
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  user      User        @relation(fields: [userId], references: [id])
+  userId    String      @unique @map("user_id")
+  @@map("wallets")
+}
+
+model Transaction {
+  id                    String          @id @default(cuid())
+  amount                Decimal         @db.Decimal(12, 2)
+  type                  TransactionType
+  status                TransactionStatus
+  providerTransactionId String?         @unique @map("provider_transaction_id")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+  user                  User            @relation(fields: [userId], references: [id])
+  userId                String          @map("user_id")
+  @@map("transactions")
+}
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  bankName      String   @map("bank_name")
+  holderName    String   @map("holder_name")
+  accountNumber String   @map("account_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String   @map("user_id")
+  @@map("bank_accounts")
+}
+
+model CryptoAccount {
+  id            String   @id @default(cuid())
+  walletAddress String   @map("wallet_address")
+  network       String
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String   @map("user_id")
+  @@map("crypto_accounts")
+}
+
+
+// --- GAME MODELS ---
+model GameProvider {
+  id         String  @id @default(cuid())
+  providerName String  @unique @map("provider_name")
+  isActive   Boolean @default(true) @map("is_active")
+  @@map("game_providers")
+}
+
+model GameBet {
+  id              String      @id @default(cuid())
+  gameProvider    String      @map("game_provider")
+  providerRoundId String      @map("provider_round_id")
+  providerBetId   String      @unique @map("provider_bet_id")
+  betAmount       Decimal     @map("bet_amount") @db.Decimal(12, 2)
+  payoutAmount    Decimal     @default(0) @map("payout_amount") @db.Decimal(12, 2)
+  status          GameBetStatus
+  betType         String      @map("bet_type")
+  betValue        String      @map("bet_value")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  user            User        @relation(fields: [userId], references: [id])
+  userId          String      @map("user_id")
+  @@map("game_bets")
+}
+
+
+// --- MISC MODELS ---
+model Address {
+  id         String    @id @default(cuid())
+  // ... address fields
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String    @map("user_id")
+  @@map("addresses")
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  type       NotificationType
+  message    String           @db.Text
+  isRead     Boolean          @default(false) @map("is_read")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  user       User             @relation(fields: [userId], references: [id])
+  userId     String           @map("user_id")
+  @@map("notifications")
+}
+
+
+// --- ENUMS ---
+enum UserStatus { ACTIVE, INACTIVE, FROZEN }
+enum RoleName { MEMBER, LEADER, ADMIN }
+enum Gender { MALE, FEMALE }
+enum WalletStatus { ACTIVE, SUSPENDED }
+enum TransactionType { DEPOSIT, WITHDRAWAL, BET, WIN, REFUND }
+enum TransactionStatus { PENDING, SUCCESS, FAILED }
+enum GameBetStatus { WON, LOST, PENDING, REFUNDED }
+enum NotificationType { TRANSACTION, ANNOUNCEMENT, GAME }
+```
+
+## Deployment 🚀
+
+The application is deployed using a separate frontend, backend, and database.
+
+### 1. Database (Neon)
+
+### 2. Backend (Render)
+
+- **Service Type**: Private Service
+- **Repository**: Your GitHub/GitLab repo
+- **Root Directory**: `backend`
+- **Build Command**: `pnpm install && pnpm exec prisma generate && pnpm run build`
+- **Start Command**: `pnpm run start`
+- **Environment Variables**:
+  - `DATABASE_URL`: The pooled connection string from Neon.
+  - `JWT_SECRET`: Your production JWT secret.
+
+### 3. Frontend (Render)
+
+- **Service Type**: Web Service
+- **Repository**: Your GitHub/GitLab repo
+- **Root Directory**: `frontend`
+- **Build Command**: `pnpm install && pnpm run build`
+- **Start Command**: `pnpm run start`
+- **Environment Variables**:
+  - `NEXT_PUBLIC_API_URL`: The internal service URL of your Render backend (e.g., `http://your-backend-service-name:10000`).
+
+### 4. Production Migrations
+
+After your backend service is deployed, you must run migrations against your Neon database.
+
+1.  Go to your backend service on the Render dashboard.
+2.  Open the **Shell** tab.
+3.  Run the command: `pnpm exec prisma migrate deploy`
